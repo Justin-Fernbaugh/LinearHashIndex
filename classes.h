@@ -21,6 +21,8 @@ public:
         manager_id = stoi(fields[3]);
     }
 
+    Record() {}
+
     void print() {
         cout << "\tID: " << id << "\n";
         cout << "\tNAME: " << name << "\n";
@@ -32,6 +34,15 @@ public:
         //  8 * 2 for the size of each int 
         return (16 + name.size() + bio.size());
     }
+};
+
+class Page {
+    public:
+    int overflowOffset = -1; // offset of overflow page ( likely not next to eachother )
+    int pageSize = 0;       // # of records in the page
+    Record records[2];
+    string buffer;         // used to padd the Page until it's 4096 bytes 
+    Page() {}
 };
 
 class LinearHashIndex {
@@ -49,20 +60,13 @@ private:
     int nextFreeBlock; // Next place to write a bucket. Should increment it by BLOCK_SIZE whenever a bucket is written to EmployeeIndex
     string IndexFileName;      // Name of index file
 
-    struct PageData {
-        int overflowOffset = -1; // offset of overflow page ( likely not next to eachother )
-        int pageSize = 0;       // # of records next to page
-        int recordOneBytes = 0; // used to keep track of size in bytes of record one
-        int recordTwoBytes = 0; // used to keep track of size in bytes of record two
-    };
-
     // Insert new record into index
     void insertRecord(Record record) {
         fstream IndexFile(IndexFileName, ios::binary | ios::in | ios::trunc);
         // No records written to index yet
         if (numRecords == 0) {
             for(int j = 0; j < i; j++) {
-
+                createPage(IndexFile);
             }
             // Initialize index with first blocks (start with 4)
 
@@ -78,12 +82,10 @@ private:
     }
 
     int createPage(fstream &IndexFile) {
-        PageData page;                  // initialize page struct (basically header) 
+        Page page;                      // initialize page struct (basically header) 
                                         // to keep track of records next to this struct in binary file
         page.overflowOffset = -1;
         page.pageSize = 0;
-        page.recordOneBytes = 0;
-        page.recordTwoBytes = 0;
 
         IndexFile.write(reinterpret_cast<char *>(&page), sizeof(page));
 
@@ -101,6 +103,18 @@ private:
 
     int getHashBits(int hash, int numBits) {
         return (hash & ((1 << i)) -1);
+    }
+
+    string addBuffer(Page page) {
+        page.buffer = "";
+
+        while (page.buffer.size() < (BLOCK_SIZE + sizeof(page) - 2)) {
+            // printf("buffer size: %d \n", page.buffer.size());
+            page.buffer.append("~");
+        }
+        page.buffer.append("\n");
+
+        return page.buffer;
     }
 
     Record stringToRecord(string line) {
@@ -128,6 +142,26 @@ public:
 
         // Create your EmployeeIndex file and write out the initial 4 buckets
         // make sure to account for the created buckets by incrementing nextFreeBlock appropriately
+        fstream IndexFile(IndexFileName, ios::binary | ios::out | ios::trunc);
+        printf("Created EmployeeIndex\n");
+
+        for (int j = 0; j < n; j++) {
+            Page page;
+            page.overflowOffset = -1;
+            page.pageSize = 0;
+            printf("Before addBuffer\n");
+            page.buffer = addBuffer(page);
+
+            printf("Writing page\n");
+            IndexFile.write(reinterpret_cast<char *>(&page), sizeof(page));
+
+            numRecords++;
+            nextFreeBlock += BLOCK_SIZE;
+            blockDirectory.push_back(nextFreeBlock);
+        }
+        // make sure to account for the created buckets by incrementing nextFreeBlock appropriately
+        IndexFile.close();
+        printf("Closing Index File\n");
       
     }
 
@@ -138,7 +172,7 @@ public:
         string line;
         while(getline(EmployeeCSV, line)) {
             Record newRecord = stringToRecord(line);
-            insertRecord(newRecord);
+            // insertRecord(newRecord);
         }
         EmployeeCSV.close();
     }
