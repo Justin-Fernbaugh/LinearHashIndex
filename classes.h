@@ -43,6 +43,11 @@ class Page {
     Record records[2];
     string buffer;         // used to padd the Page until it's 4096 bytes 
     Page() {}
+
+    //returns size of all objects including buffer
+    int size() {
+        return (sizeof(overflowOffset) + sizeof(pageSize) + records[0].size() + records[1].size() + buffer.size());
+    }
 };
 
 class LinearHashIndex {
@@ -80,25 +85,40 @@ private:
 
 
     }
-
+    
     int createPage(fstream &IndexFile) {
         Page page;                      // initialize page struct (basically header) 
                                         // to keep track of records next to this struct in binary file
         page.overflowOffset = -1;
         page.pageSize = 0;
 
-        IndexFile.write(reinterpret_cast<char *>(&page), sizeof(page));
+        IndexFile.write(reinterpret_cast<char *>(&page), 4096);
+
+        blockDirectory.push_back(nextFreeBlock);
 
         nextFreeBlock++;
         numRecords++;
-        n++;
-
-        blockDirectory.push_back(nextFreeBlock);
+        
         return nextFreeBlock; // return next block available to use
     }
 
+    // Find a page by ID
+    int findPage(int id)
+    {
+        int result, hashed;
+        hashed = getHash(id, n, false); // get hash of id (using least significant bits of id
+        result = hashed % (int)(pow(2, i));
+
+        if (result >= n) {
+            result = hashed % static_cast<int>(pow(2, i - 1));
+        }
+
+        printf("Found page: %d \n", result);
+        return blockDirectory[result];
+    }
+
     int getHash(int id, int n, bool flip) {
-        return (id % (int)pow(2, 16)% n);
+        return (id % (int)pow(2, 8)% n);
     }
 
     int getHashBits(int hash, int numBits) {
@@ -108,11 +128,11 @@ private:
     string addBuffer(Page page) {
         page.buffer = "";
 
-        while (page.buffer.size() < (BLOCK_SIZE + sizeof(page) - 2)) {
-            // printf("buffer size: %d \n", page.buffer.size());
+        while (page.size() < (BLOCK_SIZE - 2)) {
             page.buffer.append("~");
         }
         page.buffer.append("\n");
+        printf("buffer size: %d \n", page.buffer.size());
 
         return page.buffer;
     }
@@ -149,15 +169,16 @@ public:
             Page page;
             page.overflowOffset = -1;
             page.pageSize = 0;
-            printf("Before addBuffer\n");
+            // add record to page by hash
+            // assign the first 4 records to a page by getting their hash to create a page in the linear hash index
             page.buffer = addBuffer(page);
 
-            printf("Writing page\n");
+            printf("Creating page\n");
             IndexFile.write(reinterpret_cast<char *>(&page), sizeof(page));
 
+            blockDirectory.push_back(nextFreeBlock); // add the next block to the blockDirectory
             numRecords++;
             nextFreeBlock += BLOCK_SIZE;
-            blockDirectory.push_back(nextFreeBlock);
         }
         // make sure to account for the created buckets by incrementing nextFreeBlock appropriately
         IndexFile.close();
