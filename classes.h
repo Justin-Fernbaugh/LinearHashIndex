@@ -116,72 +116,7 @@ private:
     // Insert new record into index
     Page insertRecord(Record record) {
         // printf("insertRecord() \n");
-        // fstream IndexFile(IndexFileName, ios::in | ios ::out);
         fstream IndexFile(IndexFileName, ios::binary | ios::in | ios ::out);
-        // if(!IndexFile.is_open()){
-        //     throw "Error Opening in getPage()";
-        // }
-
-        int pageOffset = blockDirectory[bitHash(record.id)] - 1;
-        printf("insertRecord() pageOffset: %d\n", pageOffset);
-
-        // No records written to index yet
-        // if (numRecords == 0) {
-        //     for(int j = 0; j < i; j++) {
-                
-        //     }
-        //     // Initialize index with first blocks (start with 4)
-
-        // }
-
-        
-        Page page = getPage(pageOffset, IndexFile); // have this return the Page class instead of vector<string>
-        // printf("insertRecord() page: %s\n", page.pageToString().c_str());
-
-
-        // Check if page is full
-        if(page.pageSize > 1) {
-            // printf("Page is full\n");
-            // ignore bit flip for now
-            // Create overflow page if it doesn't already exist
-            if(page.overflowOffset < 2) {
-                printf("insertRecord() page.overflowOffset == 0 \n");
-                //Create overflow page and place record in it
-                int overflowOffset = createEmptyPage(IndexFile, pageOffset, true); // create an empty page at the original page index + overflow offset
-                Page overflowPage = getPage(pageOffset, IndexFile, true); // get the overflow page located at the original page index + overflow offset
-                overflowPage.records.push_back(record);
-                overflowPage.pageSize++;
-                numRecords++;
-                writePage(overflowPage, pageOffset, IndexFile, true); // use original pageOffset and overflow = true then writePage will determine the correct location
-
-                // Update overflowOffset in original page
-                page.overflowOffset = 1;
-                writePage(page, pageOffset, IndexFile); // write OG page to update overflowOffset
-
-                
-            } else if(page.overflowOffset > 0) { // If page already has an overflowOffset
-                printf("insertRecord() page.overflowOffset > 0 \n");
-                // Place record in existing overflow page
-                int overflowOffset = createEmptyPage(IndexFile, true);
-                Page overflowPage = getPage(overflowOffset, IndexFile);
-                if(overflowPage.pageSize > 1) {
-                    // Print overflow page reached max capacity
-                    printf("Overflow page has reached capacity \n");
-                } else {
-                    // continue with adding page to overflow page
-                    overflowPage.records.push_back(record);
-                    numRecords++;
-                }
-                
-            }
-        } else {
-            // If page isn't full place record in page
-            printf("insertRecord() normal page\n\n");
-            page.records.push_back(record);
-            page.pageSize++;
-            numRecords++;
-            writePage(page, pageOffset, IndexFile);
-        }
 
         // Add record to the index in the correct block, creating a overflow block if necessary
         // if page is full check if bit flip location can hold the record. 
@@ -189,18 +124,111 @@ private:
         // if bit flip location can hold the record, place it there
         // if page is not full, place the record in the page
 
+        int pageOffset = blockDirectory[bitHash(record.id)] - 1; // get the page offset from the blockDirectory
+        Page page = getPage(pageOffset, IndexFile); // have this return the Page class instead of vector<string>
+        printf("insertRecord() pageOffset: %d\n", pageOffset);
+        // printf("insertRecord() page: %s\n", page.pageToString().c_str());
 
+        // if the page isn't full then add the record to the page
+        if(page.pageSize < 2) {
+            // If page isn't full place record in page
+            printf("insertRecord() normal page\n");
+            page.records.push_back(record);
+            page.pageSize++;
+            numRecords++;
+            writePage(page, pageOffset, IndexFile);
 
+            IndexFile.close();
+            printf("insertRecord() ret\n\n");
+            return page;
+        }
+        // printf("Page is full\n");
+        
+        // if page is full check if bit flip location can hold the record.
+        int bitFlipOffset = blockDirectory[bitHash(record.id, true)] - 1;
+        Page bitFlipPage = getPage(bitFlipOffset, IndexFile);
+        if(bitFlipPage.pageSize < 2) {
+            // If bit flip location can hold the record, place it there
+            printf("insertRecord() bitFlipPage\n");
+            bitFlipPage.records.push_back(record);
+            bitFlipPage.pageSize++;
+            numRecords++;
+            writePage(bitFlipPage, bitFlipOffset, IndexFile);
 
+            IndexFile.close();
+            printf("insertRecord() ret\n\n");
+            return bitFlipPage;
+        }
+
+        // Page overflow logic
+        // Create overflow page if it doesn't already exist
+        if(page.overflowOffset == 0) { // when page currently has no overflow page
+            printf("insertRecord() page.overflowOffset == 0 \n");
+            //Create overflow page and place record in it
+            int overflowOffset = createEmptyPage(IndexFile, pageOffset, true); // create an empty page at the original page index + overflow offset
+            Page overflowPage = getPage(pageOffset, IndexFile, true); // get the overflow page located at the original page index + overflow offset
+            overflowPage.records.push_back(record);
+            overflowPage.pageSize++;
+            numRecords++;
+            writePage(overflowPage, pageOffset, IndexFile, true); // use original pageOffset and overflow = true then writePage will determine the correct location
+
+            // Update overflowOffset in original page
+            page.overflowOffset = 1;
+            writePage(page, pageOffset, IndexFile); // write OG page to update overflowOffset
+
+            
+        } else if(page.overflowOffset == 1) { // If page currently has an overflow page
+            printf("insertRecord() page.overflowOffset > 0 \n");
+            // Place record in existing overflow page
+            Page overflowPage = getPage(pageOffset, IndexFile, true); // get the overflow page located at the original page index + overflow offset
+            if(overflowPage.pageSize > 1) { // Overflow page is full then, create new overflow page and place record in it
+                printf("insertRecord() overflowPage max capacity\n");
+                // If overflow page is full, create new overflow page and place record in it
+                int overflowOffset = createEmptyPage(IndexFile, overflowOffset, true); // create empty page at overflowOffset;
+                Page newOverflowPage = getPage(pageOffset, IndexFile, true); // get the overflow page located at the original page index + overflow offset
+                newOverflowPage.records.push_back(record);
+                newOverflowPage.pageSize++;
+                numRecords++;
+                writePage(newOverflowPage, overflowOffset, IndexFile, true);
+
+                overflowPage.overflowOffset = 1;
+                writePage(overflowPage, pageOffset, IndexFile, true); // write OG page to update overflowOffset (not sure if this is necessary, might be able to remove it
+
+            } else {
+                // continue with adding page to overflow page
+                overflowPage.records.push_back(record);
+                overflowPage.pageSize++;
+                numRecords++;
+                writePage(overflowPage, pageOffset, IndexFile, true); // use original pageOffset and overflow = true then writePage will determine the correct location
+            }
+            
+        }
 
         // Take neccessary steps if capacity is reached:
 		// increase n; increase i (if necessary); place records in the new bucket that may have been originally misplaced due to a bit flip
+        //increase n when this condition is true
+        if ((float)numRecords > (float)n * 5 * 0.7) {
+            printf("insertRecord() n increased\n");
+            n++; // linear hash index only increases n one at a time
+            createEmptyPage(IndexFile); // Create a new empty page
+            blockDirectory.push_back(nextFreeBlock); // Add nextFreeblock (index) to back of blockDirectory
+            // check if i needs to be increased
+            if (n > pow(2, i)) {
+                printf("insertRecord() i increased\n");
+                i++;
+                // if i is increased, then we need to rehash the records
+
+            }
+        }
 
 
         IndexFile.close();
         printf("insertRecord() ret\n\n");
         return page;
     }
+
+    // create function to rehash records
+
 
     // find bucket number given id
     int getIndexById(int id) {
@@ -209,10 +237,12 @@ private:
         index = hashed % static_cast<int>(pow(2, i));
 
         if (index >= n) {
+            printf("getIndexById() before %d\n", index);
             index = hashed % static_cast<int>(pow(2, i - 1));
+            printf("getIndexById() after %d\n", index);
         }
 
-        printf("getIndexById: %d  at %d \n", index, blockDirectory[index]);
+        // printf("getIndexById: %d  at %d \n", index, blockDirectory[index]);
         return blockDirectory[index];
     }
 
@@ -220,14 +250,14 @@ private:
         // printf("getPage()\n");
         char temp[4098];
         if(overflow) {
-            pageOffset = pageOffset + OVERFLOW_OFFSET;
+            pageOffset = (pageOffset * BLOCK_SIZE) + OVERFLOW_OFFSET;
         } else {
             pageOffset = pageOffset * BLOCK_SIZE;
         }
-        printf("getPage() pageOffset: %d\n", pageOffset);
+        // printf("getPage() pageOffset: %d\n", pageOffset);
         
         IndexFile.seekg(pageOffset);
-        IndexFile.read(temp, BLOCK_SIZE - 4); 
+        IndexFile.read(temp, BLOCK_SIZE - 4);
         // printf("getPage() reading: %s\n", temp);
         // print the number of chars in temp
         // printf("getPage() temp size: %d\n", strlen(temp));
@@ -249,7 +279,7 @@ private:
     void writePage(Page page, int pageOffset, fstream &IndexFile, bool overflow = false) {
         // printf("writePage()\n");
         if (overflow) {
-            pageOffset = pageOffset + OVERFLOW_OFFSET;
+            pageOffset = (pageOffset * BLOCK_SIZE) + OVERFLOW_OFFSET;
         } else {
             pageOffset = pageOffset * BLOCK_SIZE;
         }
@@ -259,7 +289,7 @@ private:
 
         // write the bytes of the page to the file
         string pageString = page.pageToString();
-        printf("writePage() pageString: %s\n", pageString.c_str());
+        // printf("writePage() pageString: %s\n", pageString.c_str());
         pageString = addBuffer(pageString);
         // printf("writePage() addBuffer() size: %d\n", pageString.size());
 
@@ -274,11 +304,11 @@ private:
     // This only create pages and not overflow pages
     // Because when finding an index we might go to it by index * 4096 and then add the overflow offset(implement overflow offset)
     int createEmptyPage(fstream &IndexFile, int pageOffset = 0, bool overflow = false) {
-        printf("Creating page\n");
+        // printf("Creating page\n");
         // If it's an overflow page then pageOffset passes the index of the page which we use to store the overflow page 
         // at the pageOffset + OVERFLOW_OFFSET (this way we can find the overflow page by adding the overflow offset to the index of the page)
         if(overflow) {
-            pageOffset = pageOffset + OVERFLOW_OFFSET;
+            pageOffset = (pageOffset * BLOCK_SIZE) + OVERFLOW_OFFSET;
         } else {
             pageOffset = nextFreeBlock * BLOCK_SIZE;
         }
@@ -300,20 +330,6 @@ private:
         return pageOffset; // return the location of the page
     }
 
-    // Find a page by ID
-    int findPage(int id) {
-        int result, hashed;
-        hashed = getHash(id, n, false); // get hash of id (using least significant bits of id
-        result = hashed % (int)(pow(2, i));
-
-        if (result >= n) {
-            result = hashed % static_cast<int>(pow(2, i - 1));
-        }
-
-        printf("Found page: %d \n", result);
-        return blockDirectory[result];
-    }
-
     // Hash function that should return i bits
     // The flip parameter is used to determine to return a bitFlip or regular hash
     int getHash(int id, int i, bool bitFlip) {
@@ -331,9 +347,14 @@ private:
         return (hash & ((1 << i)) -1);
     }
 
-    int bitHash(int id) {
+    int bitHash(int id, bool bitFlip = false) {
         bitset<8> decimalBitset(id % 216);
         unsigned int lsbBits = (decimalBitset.to_ulong()) & ((1<<i)-1);
+        if(bitFlip) {
+            printf("bitHash() before bitFlip: %d\n", lsbBits);
+            lsbBits = lsbBits ^ 1;
+            printf("bitHash() bitFlip: %d\n", lsbBits);
+        }
         return lsbBits;
     }
 
@@ -416,6 +437,7 @@ public:
             // Page page = insertRecord(newRecord);
         }
         EmployeeCSV.close();
+        printf("createFromFile() close\n\n");
     }
 
     // Given an ID, find the relevant record and print it
