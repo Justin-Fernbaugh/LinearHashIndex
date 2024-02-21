@@ -23,6 +23,22 @@ int main(int argc, char* const argv[]) {
     emp_index.createFromFile("Employee.csv");
     
     // Loop to lookup IDs until user is ready to quit
+    string input;
+    while (true) {
+        cout << "Enter an employee ID to look up: ";
+        cin >> input;
+        if (input == "quit") {
+            break;
+        }
+        int id = stoi(input);
+        Record record = emp_index.findRecordById(id);
+        if (record.id == -1) {
+            cout << "Employee not found" << endl;
+        } else {
+            // cout << "Employee found: " << record.id << ", " << record.name << ", " << record.bio << endl;
+            record.print();
+        }
+    }
     
 
     return 0;
