@@ -53,6 +53,12 @@ class Page {
             parsePage();
             // printf("Page() returned\n");
         }
+        Page() {
+            this->page = "";
+            this->pageSize = 0;
+            this->overflowOffset = 0;
+            this->records = vector<Record>();
+        }
 
         void parsePage() {
             // parse the page string into the variables
@@ -62,34 +68,28 @@ class Page {
             while ((pos = page.find(delimiter)) != string::npos) {
                 token = page.substr(0, pos);
                 page.erase(0, pos + delimiter.length());
-                if(token.find("overflowOffset") != string::npos) {
-                    overflowOffset = stoi(token.substr(token.find(":") + 1));
-                    // printf("page() found overflowOffset \n");
-                } else if(token.find("pageSize") != string::npos) {
-                    pageSize = stoi(token.substr(token.find(":") + 1));
-                    // printf("page() found pageSize \n");
-                } else {
-                    vector<string> recordFields;
-                    string csvField;
-                    stringstream streamTuple(token);
-                    // printf("page() token: %s\n", token.c_str());
-                    for(int i=0; i < 4; i++) {
-                        getline(streamTuple, csvField, ',');
-                        if(csvField.find("Record") != string::npos) {
-                            csvField = csvField.substr(csvField.find(":") + 1);
-                        }
-                        recordFields.push_back(csvField);
-                        // printf("page() found record %s\n", csvField.c_str());
+
+                vector<string> recordFields;
+                string csvField;
+                stringstream streamTuple(token);
+                // printf("page() token: %s\n", token.c_str());
+                for(int i=0; i < 4; i++) {
+                    getline(streamTuple, csvField, ',');
+                    if(csvField.find("Record") != string::npos) {
+                        csvField = csvField.substr(csvField.find(":") + 1);
                     }
-                    Record tmpRecord(recordFields);
-                    records.push_back(tmpRecord);
-                    
+                    recordFields.push_back(csvField);
+                    // printf("page() found record %s\n", csvField.c_str());
                 }
+                Record tmpRecord(recordFields);
+                records.push_back(tmpRecord);
+                    
             }
         }
 
         string pageToString() {
-            string pageString = "overflowOffset:" + to_string(overflowOffset) + ";pageSize:" + to_string(pageSize) + ";";
+            // string pageString = "overflowOffset:" + to_string(overflowOffset) + ";pageSize:" + to_string(pageSize) + ";";
+            string pageString;
             for(int i = 0; i < records.size(); i++) {
                 pageString += "Record:" + to_string(records[i].id) + "," + records[i].name + "," + records[i].bio + "," + to_string(records[i].manager_id) + ";";
             }
@@ -284,7 +284,7 @@ private:
             IndexFile.close();
 
             for (const auto& record : tempRecords) {
-                printf("rehash() inserting record: %d\n", record.id);
+                // printf("rehash() inserting record: %d\n", record.id);
                 insertRecord(record); // Reinsert each record
             }
         }
@@ -302,7 +302,10 @@ private:
         }
         
         IndexFile.seekg(pageOffset);
-        IndexFile.read(temp, BLOCK_SIZE - 4);
+        Page page;
+        IndexFile.read(reinterpret_cast<char*>(&page.overflowOffset), sizeof(page.overflowOffset));
+        IndexFile.read(reinterpret_cast<char*>(&page.pageSize), sizeof(page.pageSize));
+        IndexFile.read(temp, BLOCK_SIZE - 4 - (sizeof(int) * 2));
         // printf("getPage() reading: %s\n", temp);
         // print the number of chars in temp
         // printf("getPage() temp size: %d\n", strlen(temp));
@@ -311,13 +314,12 @@ private:
         string line(temp);
         // printf("getPage() char to string\n");
         line = line.erase(line.find("~"), string::npos);
-        // if(overflow) {
-        //     line = line.erase(line.find("\n"), string::npos);
-        // }
         // printf("getPage() line: %s\n", line.c_str());
         // turn the string into the Page class 
         // printf("getPage() creating page\n");
-        Page page(line);
+        page.page = line;
+        // printf("getPage() parsing \n");
+        page.parsePage();
 
         // printf("getPage() returned \n");
         return page;
@@ -341,7 +343,10 @@ private:
         const char *pageChar = pageString.c_str();
         // printf("writePage() pageChar: %s\n", pageChar);
         IndexFile.seekg(pageOffset, ios::beg);
-        IndexFile.write(pageChar, BLOCK_SIZE);
+        IndexFile.write(reinterpret_cast<const char*>(&page.overflowOffset), sizeof(page.overflowOffset));
+        IndexFile.write(reinterpret_cast<const char*>(&page.pageSize), sizeof(page.pageSize));
+        IndexFile.write(pageChar, BLOCK_SIZE - (sizeof(int) * 2));
+        
     }
     
 
@@ -359,14 +364,19 @@ private:
         }
         // printf("createEmptyPage() pageOffset: %d\n", pageOffset);
 
-        string page = "overflowOffset:0;pageSize:0;";
+        // string page = "overflowOffset:0;pageSize:0;";
+        string page;
+        int overflowOffset = 0;
+        int pageSize = 0;
         page = addBuffer(page);
         const char *pageChar = page.c_str();
         // printf("createEmptyPage: %s\n\n", pageChar);
 
 
         IndexFile.seekg(pageOffset); // move to empty page location or empty overflow page location
-        IndexFile.write(pageChar, BLOCK_SIZE);
+        IndexFile.write(reinterpret_cast<const char*>(&overflowOffset), sizeof(overflowOffset));
+        IndexFile.write(reinterpret_cast<const char*>(&pageSize), sizeof(pageSize));
+        IndexFile.write(pageChar, BLOCK_SIZE - (sizeof(int) * 2));
         // IndexFile.write(reinterpret_cast<char *>(&page), 4096);
 
         if(!overflow) {
@@ -409,7 +419,7 @@ private:
     string addBuffer(string record) { // adds padding to string
         string bufferRecord = record;
 
-        while (bufferRecord.size() < BLOCK_SIZE) {
+        while (bufferRecord.size() < BLOCK_SIZE - (sizeof(int) * 2)) {
             bufferRecord.append("~");
         }
         bufferRecord.append("\n");

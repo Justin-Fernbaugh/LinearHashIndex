@@ -19,7 +19,7 @@ using namespace std;
 int main(int argc, char* const argv[]) {
 
     // Create the index
-    LinearHashIndex emp_index("EmployeeIndex");
+    LinearHashIndex emp_index("EmployeeIndex.bin");
     emp_index.createFromFile("Employee.csv");
     
     // Loop to lookup IDs until user is ready to quit
